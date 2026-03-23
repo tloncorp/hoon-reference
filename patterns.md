@@ -2,6 +2,8 @@
 
 How to write idiomatic Hoon: composition patterns, error handling, and common pitfalls. All examples are drawn from real production code.
 
+This file leans heavily toward production defaults for Gall agents. Some patterns here are everyday Hoon technique; others are only worth the complexity in larger agents with state, subscribers, compatibility requirements, or wrapper libraries.
+
 ---
 
 ## Common Idioms
@@ -215,6 +217,8 @@ For complex agents with many nested cores, instead of threading card lists every
 ```
 
 This lets helper arms just call `(emit card)` instead of threading card lists through every return.
+
+This is a good pattern when you already have nested helper doors or wrappers. It is overkill for small agents where plain `(quip card _state)` threading stays readable.
 
 ### Cascading Guards (Early Return)
 
@@ -446,7 +450,7 @@ When HTTP handler or admin logic should follow the same path as a typed poke, re
 |=  cmd=command
 =^  caz  this
   (on-poke %pals-command !>(cmd))
-['Processed succesfully.' caz +.state]
+['Processed successfully.' caz +.state]
 
 ::  %noun handler redirects to the typed mark handler
 ?+  q.vase  $(mark %pals-command)        ::  re-enter on-poke with correct mark
@@ -519,6 +523,16 @@ A common pattern returns `(quip card _state)` from helper arms, letting the call
 =^  cards  state  (start-stream:do +.action)
 [cards this]
 ```
+
+### When Not to Use the Big Patterns
+
+For a small agent, you can usually skip:
+- ACUR-style message families if there is no real trust-boundary split.
+- Versioned mark stacks if the only client updates with the desk.
+- Wrapper libraries if plain `on-poke` / `on-agent` logic is still legible.
+- Card accumulators if simple `=^` threading is enough.
+
+Default to the simpler shape first. Add the larger patterns when a real compatibility, composition, or maintenance problem appears.
 
 ### Set Operations as Pipelines
 

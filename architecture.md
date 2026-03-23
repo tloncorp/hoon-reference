@@ -1,10 +1,12 @@
 # Urbit Application Architecture
 
-How to build, structure, and version Gall agents.
+How to build, structure, and version Gall agents. This file mixes Gall facts with production defaults for large, compatibility-conscious applications.
 
 ---
 
 ## Agent Architecture
+
+Most patterns in this file are written from the perspective of long-lived agents that may serve clients at different update levels. For a small single-desk app, some of this machinery is optional. For Tlon-style apps, it is the default.
 
 ### The 10-Arm Agent Interface
 
@@ -66,7 +68,7 @@ Every Gall agent implements this interface:
 
 ### State Versioning and Migration
 
-Always tag state with a version number in the head. Migrate through each version sequentially in `on-load`:
+For persistent production agents, default to tagging state with a version number in the head and migrating through each version sequentially in `on-load`:
 
 ```hoon
 ++  on-load
@@ -215,6 +217,8 @@ This is especially important in wrapper libraries that intercept and transform c
 ## Structure Design (sur/)
 
 ### The ACUR Model (Actions, Commands, Updates, Responses)
+
+This is a production pattern for larger agents. It is useful when local UI requests, remote commands, canonical updates, and frontend responses have meaningfully different trust boundaries. Small agents do not need this split.
 
 Large agents separate message types into distinct roles. This is not just naming convention — each category has a different trust model, direction of flow, and serialization strategy:
 
@@ -377,9 +381,11 @@ Marks define how data is serialized and converted between formats. Every mark is
 
 ## Versioning Strategy
 
-The codebase maintains backwards compatibility across client versions through a layered versioning system. This is one of the most important architectural patterns — it lets old clients keep working while the backend evolves.
+The codebase maintains backwards compatibility across client versions through a layered versioning system. This is one of the most important architectural patterns for apps with independently updating clients — it lets old clients keep working while the backend evolves.
 
 ### Type Versioning (sur/*-ver.hoon)
+
+Use this machinery when clients or peer agents may lag behind the desk that serves the latest state. If the only client is bundled with the desk and always updated in lockstep, client-facing type backcompat may be unnecessary. State migrations and inter-agent compatibility can still justify versioning.
 
 Versioned types live in a `-ver` file (e.g., `groups-ver.hoon`) as nested version cores. Each version imports the previous one with `=,` and selectively overrides types:
 
@@ -546,7 +552,7 @@ Watch paths follow the same version prefix pattern. Clients subscribe to the ver
 
 ### Version Bump Checklist
 
-When evolving a type:
+When evolving a type in a compatibility-sensitive app:
 
 1. **Add a new version core** in `sur/*-ver.hoon` that inherits the previous version
 2. **Add downconversion** in `lib/*-conv.hoon` from the new version to the old
@@ -556,13 +562,13 @@ When evolving a type:
 6. **Update the discipline declaration** to register the new marks and paths
 7. **Bump agent state version** and add a migration in `on-load`
 
-The old paths never go away. Old clients keep working indefinitely because every scry and subscription path continues to serve its version through on-the-fly downconversion.
+In long-lived production apps, old paths usually do not go away. Old clients keep working because every scry and subscription path continues to serve its version through on-the-fly downconversion. In a lockstep deployment, you may intentionally skip or retire older client-facing paths.
 
 ---
 
 ## Wrapper Library Pattern
 
-Libraries like `gossip`, `negotiate`, and `discipline` wrap an inner agent to add cross-cutting behavior. They intercept cards and signs, managing their own state alongside the inner agent's:
+Libraries like `gossip`, `negotiate`, and `discipline` wrap an inner agent to add cross-cutting behavior. They intercept cards and signs, managing their own state alongside the inner agent's. This is a high-leverage production pattern, not a requirement for ordinary agents:
 
 ```hoon
 ++  agent
