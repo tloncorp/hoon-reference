@@ -26,12 +26,57 @@ Since agents return `(quip card _this)` = `[(list card) agent]`, and the card li
   (~(del by receipts) ship)
 ```
 
+### =* for Aliasing Existing Wings
+
+Use `=*` (tisstar) when you just want a shorter name for an existing wing. Unlike `=/`, it creates an alias — no copy, no type annotation. The expression is re-evaluated each time the alias is used:
+
+```hoon
+::  GOOD: alias a deep wing for readability
+=*  sender  p.id.u.mkey
+?.  =(sender who)  cor
+
+::  BAD: =/ copies and adds a redundant type annotation
+=/  sender=ship  p.id.u.mkey
+?.  =(sender who)  cor
+```
+
+Use `=/` when you need a type annotation, or when the value is computed (not just a wing reference), or when you want to freeze the value at bind time.
+
+### Bare Computed Arms for Predicates
+
+When a predicate depends only on state and needs no arguments, write it as a bare arm — no gate:
+
+```hoon
+++  has-owner  ?=(^ owner)
+++  is-gateway-live  =(status %up)
+```
+
+This is cleaner than a gate that takes no sample. Use it for boolean predicates that guard multiple arms:
+
+```hoon
+?>  has-owner
+```
+
 ### Pattern: check-then-crash for permissions
 
 ```hoon
 ?>  =(our src):bowl              ::  must be local
 ?<  =(our src):bowl              ::  must be foreign
 ```
+
+### Pattern: `?>` with predicates, not `need` as a guard
+
+When you need to crash if a precondition is unmet but don't use the unwrapped value, use `?>` with a predicate — not `(need unit)` with a throwaway binding:
+
+```hoon
+::  GOOD: crash if owner not configured
+?>  has-owner
+
+::  BAD: need crashes on ~, but we throw away the result
+=/  owner-guard  (need owner)
+```
+
+Reserve `(need unit)` for when you actually use the unwrapped value.
 
 ### Pattern: murn for filter-map
 
@@ -114,12 +159,25 @@ This section shows how Hoon's primitives combine in practice. Each example is an
 
 ::  INLINED: used once, meaning is obvious from context
 ?>  =(our src):bowl
-=+  !<(cmd=command vase)
+=+  !<(=command vase)
 
 ::  INLINED: short gate, used only as an argument to turn
 %+  turn  ~(tap in out)
 |=  o=ship
 [%pass /hey %agent [o dap.bowl] %poke %pals-gesture !>([%hey ~])]
+```
+
+**Inline conditions in `=?`** when they're used once. Don't pre-bind a flag just to feed it to `=?`:
+
+```hoon
+::  GOOD: condition inlined directly
+=?  cor  ?&(pending-restart (is-owner-recently-active now.bowl))
+  (send-dm 'Your bot is back online. ✅')
+
+::  BAD: unnecessary intermediate binding
+=/  should-notify  ?&(pending-restart (is-owner-recently-active now.bowl))
+=?  cor  should-notify
+  (send-dm 'Your bot is back online. ✅')
 ```
 
 **Name intermediate card-building values** when constructing a card involves multiple steps:
@@ -240,7 +298,7 @@ Hoon doesn't have `return`. Instead, stack conditional checks that handle edge c
   ::
 ```
 
-For `on-agent`, cascade on wire first, then sign type:
+For `on-agent`, cascade on wire first, then sign type. Separate switch cases with `::` on its own line for visual rhythm:
 
 ```hoon
 ++  on-agent
@@ -248,10 +306,18 @@ For `on-agent`, cascade on wire first, then sign type:
   ^-  (quip card _this)
   ?+  wire  (on-agent:def wire sign)    ::  unknown wire -> default
       [%hey ~]
-    ?+  -.sign  (on-agent:def wire sign) :: unknown sign -> default
+    ?+    -.sign  (on-agent:def wire sign)
         %poke-ack
       ?~  p.sign  [~ this]              ::  ack: success, no-op
       ((slog u.p.sign) [~ this])        ::  nack: log and continue
+    ::
+        %fact
+      ?.  ?=(%expected-mark p.cage.sign)  cor
+      =+  !<(=update q.cage.sign)
+      (handle-update update)
+    ::
+        %kick
+      (emit %pass /path %agent [our.bowl %agent] %watch /path)
     ==
   ==
 ```
@@ -456,6 +522,52 @@ When HTTP handler or admin logic should follow the same path as a typed poke, re
 ?+  q.vase  $(mark %pals-command)        ::  re-enter on-poke with correct mark
     %resend  ...                          ::  handle special noun commands
 ==
+```
+
+### Helper Arm Design: Args vs State Readers
+
+When a helper always operates on the current state values, don't pass them as arguments — just read from state. When a helper needs a value that may differ from current state, take it as an argument:
+
+```hoon
+::  GOOD: always uses current status and lease-until, no args needed
+++  give-status-update
+  ^+  cor
+  (give %fact ~[/v1] %status-update-1 !>(`update`[%status status lease-until]))
+
+::  GOOD: takes explicit arg because it needs the OLD lease before state changes
+++  cancel-lease-timer
+  |=  lease=(unit @da)
+  ^+  cor
+  ?~  lease  cor
+  (emit %pass /lease-check %arvo %b %rest u.lease)
+```
+
+The caller can then do state mutations and pass the old value explicitly:
+
+```hoon
+=.  status  %up
+=.  cor  (cancel-lease-timer lease-until)  ::  cancel OLD lease
+=.  lease-until  `new-lut                  ::  then update
+```
+
+### State Mutations Before Side Effects
+
+Order operations so pure state changes come first, then card emissions. This makes the data flow clearer and avoids subtle bugs where a side effect reads stale state:
+
+```hoon
+::  GOOD: state first, then effects
+=.  status  %up
+=.  boot-id  `bid
+=.  cor  (cancel-lease-timer lease-until)
+=.  lease-until  `lut
+=.  cor  (emit %pass /lease-check %arvo %b %wait lut)
+give-status-update
+
+::  BAD: interleaving state and effects makes ordering bugs likely
+=.  cor  cancel-lease-timer
+=.  status  %up
+=.  lease-until  `lut
+(status-update status lease-until)
 ```
 
 ### Configuration as Constants
@@ -691,7 +803,17 @@ In `?+` and `?-`, the case tag is indented 4 spaces, and its body is indented 2 
 
 ### 3. Confusing =/ and =+
 
-`=/` gives a face (name) to the value: `=/  x=@ud  5`. `=+` pushes an unnamed value onto the subject: `=+  !<(cmd=command vase)`. Use `=/` when you'll refer to the value by name. Use `=+` when the expression itself already has a face (like `!<` which names its output).
+`=/` gives a face (name) to the value: `=/  x=@ud  5`. `=+` pushes a value onto the subject without adding a new face: `=+  !<(=command vase)`. Use `=/` when you need to name something that doesn't already have a face. Use `=+` when the expression provides its own face — this is the standard pattern for `!<`:
+
+```hoon
+::  PREFERRED: =+ with =type face — uses the type's natural name
+=+  !<(=action:v1:gs vase)
+?-  -.action  ...
+
+::  AVOID: =/ with ad-hoc short name — obscures the type
+=/  act  !<(action:v1:gs vase)
+?-  -.act  ...
+```
 
 ### 4. Forgetting that Cells are Right-Associative
 

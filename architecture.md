@@ -145,8 +145,8 @@ Dispatch on mark, enforce permissions, extract typed value:
   ?+  mark  (on-poke:def mark vase)     ::  default for unknown marks
       %pals-command
     ?>  =(our src):bowl                  ::  assert local poke only
-    =+  !<(cmd=command vase)             ::  extract typed value
-    ... handle cmd ...
+    =+  !<(=command vase)                ::  extract typed value
+    ... handle command ...
   ::
       %pals-gesture
     ?<  =(our src):bowl                  ::  assert foreign poke only

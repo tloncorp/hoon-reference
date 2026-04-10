@@ -208,8 +208,14 @@ In this code style, files usually start with `::  name: short description` follo
 ?<  test                         ::  assert false (crash if true)
 
 ?=  [type value]                 ::  type test (returns ?)
-?&(a b c)                        ::  logical AND
-?|(a b c)                        ::  logical OR
+?&(a b c)                        ::  logical AND (wide form)
+?|(a b c)                        ::  logical OR (wide form)
+
+::  tall form for multi-line compound conditions:
+?&  condition-a
+    condition-b
+    condition-c
+==
 ```
 
 ---

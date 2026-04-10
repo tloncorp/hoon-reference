@@ -38,7 +38,7 @@ At minimum, a Gall agent is a door over `bowl:gall` that returns cards plus upda
   ^-  (quip card _this)
   ?+  mark  (on-poke:def mark vase)
       %my-command
-    =/  cmd=command  !<(command vase)
+    =+  !<(=command vase)
     ...handle command...
   ==
 ++  on-peek   on-peek:def
@@ -113,11 +113,11 @@ Use one typed mark, parse it immediately, and keep the control flow obvious:
   ^-  (quip card _this)
   ?+  mark  (on-poke:def mark vase)
       %counter-command
-    =/  cmd=counter-command  !<(counter-command vase)
-    ?-  -.cmd
-        %inc  [~ this(state count +(count.state))]
-        %dec  [~ this(state count (dec count.state))]
-        %set  [~ this(state count value.cmd)]
+    =+  !<(=counter-command vase)
+    ?-  -.counter-command
+        %inc  [~ this(count +(count.state))]
+        %dec  [~ this(count (dec count.state))]
+        %set  [~ this(count value.counter-command)]
     ==
   ==
 ```
@@ -136,11 +136,12 @@ Expose the smallest useful read surface:
   ^-  (unit (unit cage))
   ?+  path  ~
     [%x %count ~]  ``noun+!>(count.state)
-    [%x %state ~]  ``noun+!>(state)
   ==
 ```
 
 Use `~` for "no such binding". Return a cage only for paths you want to support deliberately.
+
+Do **not** add a `/x/state` endpoint to expose raw agent state. The `dbug` wrapper already provides `/x/dbug/state` for development inspection. A custom state endpoint duplicates that, clutters the scry namespace, and tends to become a liability when state evolves.
 
 ---
 

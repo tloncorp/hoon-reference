@@ -33,6 +33,22 @@ The `=` prefix convention auto-names a value with its type's face:
 
 This is syntactic sugar: `=ship` means `ship=ship` — a value of type `ship` with face `ship`.
 
+### `=` (Equality) vs `?=` (Type Test)
+
+`=(a b)` tests whether two values are the same noun. `?=` tests whether a noun matches a type (mold). They are different operations:
+
+```hoon
+::  = for value equality: is this mark exactly %foo?
+?>  =(%gateway-status-action-1 mark)
+
+::  ?= for type test: does this noun match this type shape?
+?=(%fact -.sign)                 ::  is the head of sign the term %fact?
+?=(^ owner)                      ::  is owner a cell (non-null)?
+?=([@ @ ~] path)                 ::  does path match this shape?
+```
+
+Use `=` when comparing two concrete values. Use `?=` when testing whether a noun fits a type pattern. `?=` also narrows the type for subsequent code (see below), while `=` does not.
+
 ### Type Narrowing Through Branches
 
 After a type test with `?=`, the subject's type is narrowed in the appropriate branch. This is why you can access union-specific fields after a check:
