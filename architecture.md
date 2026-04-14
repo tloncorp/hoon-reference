@@ -218,7 +218,7 @@ This is especially important in wrapper libraries that intercept and transform c
 
 ### The ACUR Model (Actions, Commands, Updates, Responses)
 
-This is a production pattern for larger agents. It is useful when local UI requests, remote commands, canonical updates, and frontend responses have meaningfully different trust boundaries. Small agents do not need this split.
+This is a production pattern for larger agents. It is useful when local UI actions, remote peer-to-peer commands, canonical updates from a host/source of truth, and frontend responses have meaningfully different requirements. Small agents and agents that exclusively get either client or backend interactions do not need this split.
 
 Large agents separate message types into distinct roles. This is not just naming convention — each category has a different trust model, direction of flow, and serialization strategy:
 
@@ -385,7 +385,7 @@ The codebase maintains backwards compatibility across client versions through a 
 
 ### Type Versioning (sur/*-ver.hoon)
 
-Use this machinery when clients or peer agents may lag behind the desk that serves the latest state. If the only client is bundled with the desk and always updated in lockstep, client-facing type backcompat may be unnecessary. State migrations and inter-agent compatibility can still justify versioning.
+Use this machinery when clients or peer agents may lag behind the desk that serves the latest state. If the only client is bundled with the desk and always updated in lockstep, client-facing type backcompat may be unnecessary. State migrations and inter-desk compatibility can still justify versioning.
 
 Versioned types live in a `-ver` file (e.g., `groups-ver.hoon`) as nested version cores. Each version imports the previous one with `=,` and selectively overrides types:
 
@@ -568,7 +568,7 @@ In long-lived production apps, old paths usually do not go away. Old clients kee
 
 ## Wrapper Library Pattern
 
-Libraries like `gossip`, `negotiate`, and `discipline` wrap an inner agent to add cross-cutting behavior. They intercept cards and signs, managing their own state alongside the inner agent's. This is a high-leverage production pattern, not a requirement for ordinary agents:
+Libraries like `gossip`, `negotiate`, and `discipline` wrap an inner agent to add cross-cutting behavior. They intercept cards and signs, managing their own state alongside the inner agent's. This is a powerful but invasive production pattern for specialized use-cases, not a requirement for ordinary agents:
 
 ```hoon
 ++  agent

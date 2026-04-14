@@ -28,7 +28,7 @@ Since agents return `(quip card _this)` = `[(list card) agent]`, and the card li
 
 ### =* for Aliasing Existing Wings
 
-Use `=*` (tisstar) when you just want a shorter name for an existing wing. Unlike `=/`, it creates an alias — no copy, no type annotation. The expression is re-evaluated each time the alias is used:
+Use `=*` (tistar) when you just want a shorter name for an existing wing or expression that you will be invoking repeatedly. Unlike `=/`, it does not add a new value to the subject, but it does support an optional type annotation. The expression is re-evaluated each time the alias is used:
 
 ```hoon
 ::  GOOD: alias a deep wing for readability
@@ -40,7 +40,7 @@ Use `=*` (tisstar) when you just want a shorter name for an existing wing. Unlik
 ?.  =(sender who)  cor
 ```
 
-Use `=/` when you need a type annotation, or when the value is computed (not just a wing reference), or when you want to freeze the value at bind time.
+Use `=/` in place of `=*` only when you will be modifying the value but need to track the original, or when you want to freeze the value at bind time for some other reason.
 
 ### Bare Computed Arms for Predicates
 
@@ -66,17 +66,17 @@ This is cleaner than a gate that takes no sample. Use it for boolean predicates 
 
 ### Pattern: `?>` with predicates, not `need` as a guard
 
-When you need to crash if a precondition is unmet but don't use the unwrapped value, use `?>` with a predicate — not `(need unit)` with a throwaway binding:
+When you need to crash if a precondition is unmet but don't use the unwrapped value, use `?>` with a predicate — not `(need my-unit)` with a throwaway binding:
 
 ```hoon
 ::  GOOD: crash if owner not configured
-?>  has-owner
+?>  ?=(^ owner)
 
 ::  BAD: need crashes on ~, but we throw away the result
 =/  owner-guard  (need owner)
 ```
 
-Reserve `(need unit)` for when you actually use the unwrapped value.
+Reserve `(need my-unit)` for when you actually use the unwrapped value.
 
 ### Pattern: murn for filter-map
 
@@ -159,13 +159,15 @@ This section shows how Hoon's primitives combine in practice. Each example is an
 
 ::  INLINED: used once, meaning is obvious from context
 ?>  =(our src):bowl
-=+  !<(=command vase)
+=+  !<(cmd=command vase)
 
 ::  INLINED: short gate, used only as an argument to turn
 %+  turn  ~(tap in out)
 |=  o=ship
 [%pass /hey %agent [o dap.bowl] %poke %pals-gesture !>([%hey ~])]
 ```
+
+Hoon syntax is approximately tree-shaped and highly structural. Runes have some number of sub-hoons, and a sub-hoon can be any hoon expression. This lets you inline many expressions inside of each other. Idiomatic Hoon leans into this, actively avoiding binding values and computations to names when they can be inlined inside of the only rune/expression that makes use of them.
 
 **Inline conditions in `=?`** when they're used once. Don't pre-bind a flag just to feed it to `=?`:
 
