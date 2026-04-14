@@ -278,6 +278,8 @@ This lets helper arms just call `(emit card)` instead of threading card lists th
 
 This is a good pattern when you already have nested helper doors or wrappers. It is overkill for small agents where plain `(quip card _state)` threading stays readable.
 
+Note: abed-abet is a specific instance of a more generic pattern. Old base desk code (dojo, clay) applies this pattern for state/change accumulation on specific parts of state. That kind of factoring lets you capture logic relating to specific parts of state in dedicated "engines" which maintain all the invariants, and — because they all produce the modified engine core — can be chained very easily.
+
 ### Cascading Guards (Early Return)
 
 Hoon doesn't have `return`. Instead, stack conditional checks that handle edge cases first, falling through to the main logic:
@@ -639,12 +641,12 @@ A common pattern returns `(quip card _state)` from helper arms, letting the call
 ### When Not to Use the Big Patterns
 
 For a small agent, you can usually skip:
-- ACUR-style message families if there is no real trust-boundary split.
+- ACUR-style message families if there is no client usage, or no agent-to-agent usage, or those two will necessarily always have the exact same API design.
 - Versioned mark stacks if the only client updates with the desk.
 - Wrapper libraries if plain `on-poke` / `on-agent` logic is still legible.
 - Card accumulators if simple `=^` threading is enough.
 
-Default to the simpler shape first. Add the larger patterns when a real compatibility, composition, or maintenance problem appears.
+Default to the simpler shape first. Add the larger patterns when a real compatibility, composition, or maintenance problem appears, and remain aware of the complexity/portability trade-offs.
 
 ### Set Operations as Pipelines
 
@@ -803,15 +805,18 @@ In `?+` and `?-`, the case tag is indented 4 spaces, and its body is indented 2 
 
 ### 3. Confusing =/ and =+
 
-`=/` gives a face (name) to the value: `=/  x=@ud  5`. `=+` pushes a value onto the subject without adding a new face: `=+  !<(=command vase)`. Use `=/` when you need to name something that doesn't already have a face. Use `=+` when the expression provides its own face — this is the standard pattern for `!<`:
+`=+` pins a value to the subject. If the value happens to include a face, that comes along with it. `=/` syntactically enforces that you provide either a face, or a type, or both. `=+` is often used for one-liners, including shorthand of some kind for adding a face (such as when extracting a vase to a type with a face). `=/` is often used for storing the result of more complex computations, or simply to explicate a type for improved legibility.
 
 ```hoon
-::  PREFERRED: =+ with =type face — uses the type's natural name
+::  PREFERRED: =+ with =type face — uses the type's auto-name
 =+  !<(=action:v1:gs vase)
 ?-  -.action  ...
 
-::  AVOID: =/ with ad-hoc short name — obscures the type
-=/  act  !<(action:v1:gs vase)
+::  PREFERRED: =/ with type annotation
+=/  foo=my-type  (~(got by things) some-key)
+
+::  AVOID: =/ without type annotation
+=/  act  something
 ?-  -.act  ...
 ```
 
