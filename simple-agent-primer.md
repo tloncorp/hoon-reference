@@ -68,7 +68,7 @@ A Gall agent is a door over `bowl:gall` with ten fixed arms, most of which retur
 --
 ```
 
-Start here. Only add more structure when the simple shape stops being clear.
+The structure itself is fixed — all ten arms, with the signatures shown above, are always present. What you expand over time is the logic inside each arm, not the skeleton.
 
 ---
 
