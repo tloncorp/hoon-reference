@@ -8,7 +8,7 @@ This file is for agents with a small state model, a single desk-served client, o
 
 ## What a Simple Agent Needs
 
-At minimum, a Gall agent is a door over `bowl:gall` that returns cards plus updated state:
+A Gall agent is a door over `bowl:gall` with ten fixed arms, most of which return cards (effects) plus updated agent (with updated state). `dbug` is optional but broadly useful:
 
 ```hoon
 /-  *my-types
@@ -41,12 +41,30 @@ At minimum, a Gall agent is a door over `bowl:gall` that returns cards plus upda
     =+  !<(=command vase)
     ...handle command...
   ==
-++  on-peek   on-peek:def
-++  on-watch  on-watch:def
-++  on-agent  on-agent:def
-++  on-arvo   on-arvo:def
-++  on-leave  on-leave:def
-++  on-fail   on-fail:def
+++  on-peek
+  |=  =path
+  ^-  (unit (unit cage))
+  (on-peek:def path)
+++  on-watch
+  |=  =path
+  ^-  (quip card _this)
+  (on-watch:def path)
+++  on-agent
+  |=  [=wire =sign:agent:gall]
+  ^-  (quip card _this)
+  (on-agent:def wire sign)
+++  on-arvo
+  |=  [=wire =sign-arvo]
+  ^-  (quip card _this)
+  (on-arvo:def wire sign-arvo)
+++  on-leave
+  |=  =path
+  ^-  (quip card _this)
+  (on-leave:def path)
+++  on-fail
+  |=  [=term =tang]
+  ^-  (quip card _this)
+  (on-fail:def term tang)
 --
 ```
 
@@ -68,7 +86,7 @@ Start here. Only add more structure when the simple shape stops being clear.
 - `on-peek`: expose scry reads.
 - `on-watch`: accept subscriptions and optionally send initial facts.
 - `on-agent`: handle subscription updates and poke acknowledgements.
-- `on-arvo`: handle kernel responses like timer or Eyre results.
+- `on-arvo`: handle kernel responses like timers firing or Eyre binding confirmation.
 
 ### Usually safe to delegate early
 
@@ -81,7 +99,7 @@ For many small agents, the default implementations are enough until you have a c
 
 ## Minimal State Versioning
 
-Even for a simple persistent agent, put a version tag in state if you expect upgrades:
+Put a version tag in state from the start. It is the most basic form of future-proofing and costs almost nothing up front:
 
 ```hoon
 +$  state-0  [%0 count=@ud]
@@ -99,30 +117,31 @@ Even for a simple persistent agent, put a version tag in state if you expect upg
   [~ this(state any-state)]
 ```
 
-For lockstep client deployments, you may not need versioned marks and multiple client-facing paths. State migration is still worth doing if you expect to upgrade the desk.
+This is separate from versioned marks and multiple client-facing scry/subscription paths. Those are about client/peer compatibility and can be skipped when the desk ships the only client in lockstep — see `architecture.md`. State versioning stays useful either way.
 
 ---
 
 ## A Good First `on-poke`
 
-Use one typed mark, parse it immediately, and keep the control flow obvious:
+Handle a single mark, unpack and dispatch immediately, and keep the control flow obvious. Gate on `src.bowl` so only the local ship can drive the agent — this is the most common access check for a simple agent:
 
 ```hoon
 ++  on-poke
   |=  [=mark =vase]
   ^-  (quip card _this)
+  ?>  =(our.bowl src.bowl)
   ?+  mark  (on-poke:def mark vase)
       %counter-command
     =+  !<(=counter-command vase)
     ?-  -.counter-command
-        %inc  [~ this(count +(count.state))]
-        %dec  [~ this(count (dec count.state))]
-        %set  [~ this(count value.counter-command)]
+      %inc  [~ this(count +(count.state))]
+      %dec  [~ this(count (dec count.state))]
+      %set  [~ this(count value.counter-command)]
     ==
   ==
 ```
 
-This is boring, which is good. Boring agents are easier to debug.
+Note the backstep on the one-line `?-` case branches. This is boring, which is good. Boring agents are easier to debug.
 
 ---
 
@@ -134,12 +153,19 @@ Expose the smallest useful read surface:
 ++  on-peek
   |=  =path
   ^-  (unit (unit cage))
-  ?+  path  ~
+  ?+  path  [~ ~]
     [%x %count ~]  ``noun+!>(count.state)
   ==
 ```
 
-Use `~` for "no such binding". Return a cage only for paths you want to support deliberately.
+Scry result semantics:
+- `[~ ~]` — invalid read, reject this path.
+- `~` — cannot answer right now but the path could become valid; treated as blocking.
+- `[~ ~ cage]` — successful read.
+
+Use `[~ ~]` as the default for unknown paths.
+
+The leading `%x` in the path is the scry *care*. The current API prepends it to the `path` argument directly. `%x` is the general-purpose read and may return any mark. `%u` is an existence check and must return a `%loob`. Other cares are rare in agents.
 
 Do **not** add a `/x/state` endpoint to expose raw agent state. The `dbug` wrapper already provides `/x/dbug/state` for development inspection. A custom state endpoint duplicates that, clutters the scry namespace, and tends to become a liability when state evolves.
 
@@ -153,6 +179,7 @@ Accept a path, optionally authorize it, and send an initial fact:
 ++  on-watch
   |=  =path
   ^-  (quip card _this)
+  ?>  =(our.bowl src.bowl)
   ?+  path  (on-watch:def path)
       [%count ~]
     :_  this
@@ -160,6 +187,8 @@ Accept a path, optionally authorize it, and send an initial fact:
     ==
   ==
 ```
+
+To reject an incoming subscription you **must crash inside `on-watch`**. There is no "deny" return value. Typically this is a `?>` assertion on `src.bowl` (as above) or some other access check — falling through to `on-watch:def` on an unknown path also crashes, which is what you want.
 
 If you do not need subscriptions yet, delegate `on-watch` and add it later.
 

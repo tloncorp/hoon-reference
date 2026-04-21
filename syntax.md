@@ -209,7 +209,9 @@ In this code style, files usually start with `::  name: short description` follo
 
 ?=  [type value]                 ::  type test (returns ?)
 ?&(a b c)                        ::  logical AND (wide form)
+&(a b c)                         ::  logical AND (wide form shorthand, preferred)
 ?|(a b c)                        ::  logical OR (wide form)
+|(a b c)                         ::  logical OR (wide form shorthand, preferred)
 
 ::  tall form for multi-line compound conditions:
 ?&  condition-a
