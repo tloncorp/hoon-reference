@@ -2,6 +2,8 @@
 
 How to write idiomatic Hoon: composition patterns, error handling, and common pitfalls. All examples are drawn from real production code.
 
+This file leans heavily toward production defaults for Gall agents. Some patterns here are everyday Hoon technique; others are only worth the complexity in larger agents with state, subscribers, compatibility requirements, or wrapper libraries.
+
 ---
 
 ## Common Idioms
@@ -24,12 +26,57 @@ Since agents return `(quip card _this)` = `[(list card) agent]`, and the card li
   (~(del by receipts) ship)
 ```
 
+### =* for Aliasing Existing Wings
+
+Use `=*` (tistar) when you just want a shorter name for an existing wing or expression that you will be invoking repeatedly. Unlike `=/`, it does not add a new value to the subject, but it does support an optional type annotation. The expression is re-evaluated each time the alias is used:
+
+```hoon
+::  GOOD: alias a deep wing for readability
+=*  sender  p.id.u.mkey
+?.  =(sender who)  cor
+
+::  BAD: =/ copies and adds a redundant type annotation
+=/  sender=ship  p.id.u.mkey
+?.  =(sender who)  cor
+```
+
+Use `=/` in place of `=*` only when you will be modifying the value but need to track the original, or when you want to freeze the value at bind time for some other reason.
+
+### Bare Computed Arms for Predicates
+
+When a predicate depends only on state and needs no arguments, write it as a bare arm — no gate:
+
+```hoon
+++  has-owner  ?=(^ owner)
+++  is-gateway-live  =(status %up)
+```
+
+This is cleaner than a gate that takes no sample. Use it for boolean predicates that guard multiple arms:
+
+```hoon
+?>  has-owner
+```
+
 ### Pattern: check-then-crash for permissions
 
 ```hoon
 ?>  =(our src):bowl              ::  must be local
 ?<  =(our src):bowl              ::  must be foreign
 ```
+
+### Pattern: `?>` with predicates, not `need` as a guard
+
+When you need to crash if a precondition is unmet but don't use the unwrapped value, use `?>` with a predicate — not `(need my-unit)` with a throwaway binding:
+
+```hoon
+::  GOOD: crash if owner not configured
+?>  ?=(^ owner)
+
+::  BAD: need crashes on ~, but we throw away the result
+=/  owner-guard  (need owner)
+```
+
+Reserve `(need my-unit)` for when you actually use the unwrapped value.
 
 ### Pattern: murn for filter-map
 
@@ -118,6 +165,21 @@ This section shows how Hoon's primitives combine in practice. Each example is an
 %+  turn  ~(tap in out)
 |=  o=ship
 [%pass /hey %agent [o dap.bowl] %poke %pals-gesture !>([%hey ~])]
+```
+
+Hoon syntax is approximately tree-shaped and highly structural. Runes have some number of sub-hoons, and a sub-hoon can be any hoon expression. This lets you inline many expressions inside of each other. Idiomatic Hoon leans into this, actively avoiding binding values and computations to names when they can be inlined inside of the only rune/expression that makes use of them.
+
+**Inline conditions in `=?`** when they're used once. Don't pre-bind a flag just to feed it to `=?`:
+
+```hoon
+::  GOOD: condition inlined directly
+=?  cor  ?&(pending-restart (is-owner-recently-active now.bowl))
+  (send-dm 'Your bot is back online. ✅')
+
+::  BAD: unnecessary intermediate binding
+=/  should-notify  ?&(pending-restart (is-owner-recently-active now.bowl))
+=?  cor  should-notify
+  (send-dm 'Your bot is back online. ✅')
 ```
 
 **Name intermediate card-building values** when constructing a card involves multiple steps:
@@ -216,6 +278,10 @@ For complex agents with many nested cores, instead of threading card lists every
 
 This lets helper arms just call `(emit card)` instead of threading card lists through every return.
 
+This is a good pattern when you already have nested helper doors or wrappers. It is overkill for small agents where plain `(quip card _state)` threading stays readable.
+
+Note: abed-abet is a specific instance of a more generic pattern. Old base desk code (dojo, clay) applies this pattern for state/change accumulation on specific parts of state. That kind of factoring lets you capture logic relating to specific parts of state in dedicated "engines" which maintain all the invariants, and — because they all produce the modified engine core — can be chained very easily.
+
 ### Cascading Guards (Early Return)
 
 Hoon doesn't have `return`. Instead, stack conditional checks that handle edge cases first, falling through to the main logic:
@@ -236,7 +302,7 @@ Hoon doesn't have `return`. Instead, stack conditional checks that handle edge c
   ::
 ```
 
-For `on-agent`, cascade on wire first, then sign type:
+For `on-agent`, cascade on wire first, then sign type. Separate switch cases with `::` on its own line for visual rhythm:
 
 ```hoon
 ++  on-agent
@@ -244,10 +310,18 @@ For `on-agent`, cascade on wire first, then sign type:
   ^-  (quip card _this)
   ?+  wire  (on-agent:def wire sign)    ::  unknown wire -> default
       [%hey ~]
-    ?+  -.sign  (on-agent:def wire sign) :: unknown sign -> default
+    ?+    -.sign  (on-agent:def wire sign)
         %poke-ack
       ?~  p.sign  [~ this]              ::  ack: success, no-op
       ((slog u.p.sign) [~ this])        ::  nack: log and continue
+    ::
+        %fact
+      ?.  ?=(%expected-mark p.cage.sign)  cor
+      =+  !<(=update q.cage.sign)
+      (handle-update update)
+    ::
+        %kick
+      (emit %pass /path %agent [our.bowl %agent] %watch /path)
     ==
   ==
 ```
@@ -446,12 +520,58 @@ When HTTP handler or admin logic should follow the same path as a typed poke, re
 |=  cmd=command
 =^  caz  this
   (on-poke %pals-command !>(cmd))
-['Processed succesfully.' caz +.state]
+['Processed successfully.' caz +.state]
 
 ::  %noun handler redirects to the typed mark handler
 ?+  q.vase  $(mark %pals-command)        ::  re-enter on-poke with correct mark
     %resend  ...                          ::  handle special noun commands
 ==
+```
+
+### Helper Arm Design: Args vs State Readers
+
+When a helper always operates on the current state values, don't pass them as arguments — just read from state. When a helper needs a value that may differ from current state, take it as an argument:
+
+```hoon
+::  GOOD: always uses current status and lease-until, no args needed
+++  give-status-update
+  ^+  cor
+  (give %fact ~[/v1] %status-update-1 !>(`update`[%status status lease-until]))
+
+::  GOOD: takes explicit arg because it needs the OLD lease before state changes
+++  cancel-lease-timer
+  |=  lease=(unit @da)
+  ^+  cor
+  ?~  lease  cor
+  (emit %pass /lease-check %arvo %b %rest u.lease)
+```
+
+The caller can then do state mutations and pass the old value explicitly:
+
+```hoon
+=.  status  %up
+=.  cor  (cancel-lease-timer lease-until)  ::  cancel OLD lease
+=.  lease-until  `new-lut                  ::  then update
+```
+
+### State Mutations Before Side Effects
+
+Order operations so pure state changes come first, then card emissions. This makes the data flow clearer and avoids subtle bugs where a side effect reads stale state:
+
+```hoon
+::  GOOD: state first, then effects
+=.  status  %up
+=.  boot-id  `bid
+=.  cor  (cancel-lease-timer lease-until)
+=.  lease-until  `lut
+=.  cor  (emit %pass /lease-check %arvo %b %wait lut)
+give-status-update
+
+::  BAD: interleaving state and effects makes ordering bugs likely
+=.  cor  cancel-lease-timer
+=.  status  %up
+=.  lease-until  `lut
+(status-update status lease-until)
 ```
 
 ### Configuration as Constants
@@ -519,6 +639,16 @@ A common pattern returns `(quip card _state)` from helper arms, letting the call
 =^  cards  state  (start-stream:do +.action)
 [cards this]
 ```
+
+### When Not to Use the Big Patterns
+
+For a small agent, you can usually skip:
+- ACUR-style message families if there is no client usage, or no agent-to-agent usage, or those two will necessarily always have the exact same API design.
+- Versioned mark stacks if the only client updates with the desk.
+- Wrapper libraries if plain `on-poke` / `on-agent` logic is still legible.
+- Card accumulators if simple `=^` threading is enough.
+
+Default to the simpler shape first. Add the larger patterns when a real compatibility, composition, or maintenance problem appears, and remain aware of the complexity/portability trade-offs.
 
 ### Set Operations as Pipelines
 
@@ -677,7 +807,20 @@ In `?+` and `?-`, the case tag is indented 4 spaces, and its body is indented 2 
 
 ### 3. Confusing =/ and =+
 
-`=/` gives a face (name) to the value: `=/  x=@ud  5`. `=+` pushes an unnamed value onto the subject: `=+  !<(cmd=command vase)`. Use `=/` when you'll refer to the value by name. Use `=+` when the expression itself already has a face (like `!<` which names its output).
+`=+` pins a value to the subject. If the value happens to include a face, that comes along with it. `=/` syntactically enforces that you provide either a face, or a type, or both. `=+` is often used for one-liners, including shorthand of some kind for adding a face (such as when extracting a vase to a type with a face). `=/` is often used for storing the result of more complex computations, or simply to explicate a type for improved legibility.
+
+```hoon
+::  PREFERRED: =+ with =type face — uses the type's auto-name
+=+  !<(=action:v1:gs vase)
+?-  -.action  ...
+
+::  PREFERRED: =/ with type annotation
+=/  foo=my-type  (~(got by things) some-key)
+
+::  AVOID: =/ without type annotation
+=/  act  something
+?-  -.act  ...
+```
 
 ### 4. Forgetting that Cells are Right-Associative
 

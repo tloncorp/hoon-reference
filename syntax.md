@@ -1,6 +1,6 @@
 # Hoon Syntax Reference
 
-Complete rune, type, and standard library reference.
+Practical syntax, rune, type, and standard library reference for agent work. This is a working cheat sheet, not a complete language specification.
 
 ---
 
@@ -36,7 +36,7 @@ Configuration files at the desk root:
 ::
 ```
 
-Every file starts with `::  name: short description` followed by longer doc comments. Type definitions get inline `::` comments explaining each field.
+In this code style, files usually start with `::  name: short description` followed by longer doc comments. Type definitions often get inline `::` comments explaining each field.
 
 ---
 
@@ -208,8 +208,16 @@ Every file starts with `::  name: short description` followed by longer doc comm
 ?<  test                         ::  assert false (crash if true)
 
 ?=  [type value]                 ::  type test (returns ?)
-?&(a b c)                        ::  logical AND
-?|(a b c)                        ::  logical OR
+?&(a b c)                        ::  logical AND (wide form)
+&(a b c)                         ::  logical AND (wide form shorthand, preferred)
+?|(a b c)                        ::  logical OR (wide form)
+|(a b c)                         ::  logical OR (wide form shorthand, preferred)
+
+::  tall form for multi-line compound conditions:
+?&  condition-a
+    condition-b
+    condition-c
+==
 ```
 
 ---
