@@ -89,6 +89,24 @@ For persistent production agents, default to tagging state with a version number
   --
 ```
 
+**Always write `state-N-to-N+1`, never `state-N-to-current`.** Each migration arm bumps exactly one version. The `=?` chain in `on-load` walks through every step. This is the single most important migration pattern — the alternative is wrong:
+
+```hoon
+::  WRONG: nested ?: cascade where each old version migrates directly to current.
+::  Each branch duplicates every backfill from every later version. Adding state-9
+::  forces editing every prior branch.
+?:  =(tag %5)
+  =/  s=state-5  !<(state-5 old)
+  ::  ...300 lines of code that turns state-5 directly into state-8...
+  =/  s8=state-8  ...
+  cor(state s8)
+?:  =(tag %4)
+  =/  s=state-4  !<(state-4 old)
+  ::  ...same 300 lines, slightly different starting fields...
+```
+
+With the linear chain, you write `state-5-to-6` once and every prior version flows through it for free. State types `state-0` through `state-N` all stay defined in `sur/` (they're load-bearing for migrations); only the migration arms in `on-load` reach them.
+
 ### Cards (Effects / Messages)
 
 Cards are the agent's output — instructions to the runtime:
@@ -280,6 +298,88 @@ Large agents separate message types into distinct roles. This is not just naming
 +$  r-seat     u-seat
 ```
 
+The outer types route by identity (`flag`, `nest`); the **inner subtypes drop the subject** and carry only the verb. The outer envelope already pinned which group/channel/note we're talking about, so repeating it inside is noise:
+
+```hoon
+::  a-group: actions on a specific group. Outer [%group =flag =a-group]
+::  carries the flag; inner verbs do not repeat it.
+::
++$  a-group
+  $%  [%rename title=@t]
+      [%delete ~]
+      [%channel =nest =a-channel]    ::  nested again: outer drops, inner verbs follow
+      [%invite who=ship]
+  ==
+
+::  c-group: same shape minus client-only verbs (e.g. %restore, %publish),
+::  plus peer-only verbs (e.g. %member-join). %rename, %delete, %channel,
+::  %invite are shared 1:1 with a-group.
+::
++$  c-group
+  $%  [%rename title=@t]
+      [%delete ~]
+      [%channel =nest =c-channel]
+      [%invite who=ship]
+      [%member-join ~]               ::  peer-only: not exposed to UI
+      [%member-leave ~]
+  ==
+```
+
+### Four principles for getting ACUR right
+
+**1. The outer type carries identity; the inner type carries only the verb.**
+Don't repeat `flag=` / `notebook-id=` / `channel-id=` inside the inner tags — the outer wrapper already routed it there. Compare:
+
+```hoon
+::  GOOD: nested envelope, inner verbs are clean
+[%notebook =flag [%create-folder parent=(unit @ud) name=@t]]
+[%notebook =flag [%note id=@ud [%update body=@t expected-revision=@ud]]]
+
+::  BAD: flat shape with redundant routing fields on every verb
+[%create-folder notebook-id=@ud parent=(unit @ud) name=@t]
+[%update-note notebook-id=@ud note-id=@ud body=@t expected-revision=@ud]
+```
+
+**2. `src.bowl` is the actor — never thread `actor=ship` through actions, commands, or updates.**
+The runtime already authenticates the sender. Adding `actor=` fields invites forgery (the sender can lie about who sent it) and bloats every type. The `?> =(our src):bowl` (a-*) or permission-check (c-*) gate is what enforces identity.
+
+```hoon
+::  GOOD: src.bowl on every poke; permission checks read it directly
+[%rename title=@t]                   ::  actor = src.bowl
+
+::  BAD: actor field threaded through every variant
+[%rename title=@t actor=ship]        ::  forgeable; redundant
+```
+
+**3. Updates are *fat* — `%updated` carries the whole post-change entity, not a delta.**
+Subscribers should be able to apply an update by overwriting the whole entity, no field-by-field merging. Attribution (e.g. `updated-by=ship`) lives **on the entity**, not on the update arm.
+
+```hoon
+::  GOOD: fat updates
++$  u-notebook
+  $%  [%created =notebook =visibility]
+      [%updated =notebook]           ::  the whole post-change notebook
+      [%deleted ~]
+      [%note nid=@ud =u-note]
+      [%folder fid=@ud =u-folder]
+  ==
+
+::  BAD: delta-shaped updates that prefix every tag with the subject
++$  u-notebook
+  $%  [%notebook-created =notebook]
+      [%notebook-renamed notebook-id=@ud title=@t actor=ship]
+      [%notebook-deleted notebook-id=@ud actor=ship]
+      [%note-renamed note-id=@ud title=@t actor=ship]
+  ==
+```
+
+**4. The a-/c- split is a trust boundary, not a vocabulary split.**
+The test for whether a verb belongs in a-* or c-*: would `?> =(our src):bowl` crash on a legitimate caller?
+- **a-*** verbs originate locally — the gate `?> =(our src):bowl` is enforceable on every arm.
+- **c-*** verbs may arrive from any peer ship — they get `?> (can-edit src.bowl)` or similar permission checks instead.
+
+A common mistake: putting a *cross-ship command* (e.g. `%notify-invite`, where the host pokes the invitee) in a-* alongside local UI actions. The local-only assertion then crashes on the remote sender. If the verb requires a sender other than `our.bowl`, it belongs in c-*. Most a-* verbs do have a c-* counterpart (the local UI sends `a-foo`; the local core forwards a `c-foo` to the host); the few that don't are purely local concerns (UI-side state toggles, optimistic publishes).
+
 **The data flow:**
 
 ```
@@ -376,6 +476,35 @@ Marks define how data is serialized and converted between formats. Every mark is
 - `grab` — inbound conversions (other marks -> this mark)
 - `grad` — revision control strategy (usually `%noun`)
 - JSON arms in grow/grab enable HTTP API integration
+
+### Typed Marks for Peek Endpoints
+
+When a peek endpoint serves both noun-typed clients (in-ship scries, agent-to-agent reads) and JSON-over-HTTP clients (`.json` query, web UI), define a typed mark per endpoint and let `++ grow ++ json` do the encoding. The agent's `+on-peek` returns the raw typed value — Eyre handles JSON conversion on the wire.
+
+```hoon
+::  /mar/notes/notebook.hoon — typed mark for one notebook
+/-  n=notes
+/+  notes-json
+|_  nd=notebook-detail:n
+++  grad  %noun
+++  grab  |%  ++  noun  notebook-detail:n  --
+++  grow
+  |%
+  ++  noun  nd                                  ::  raw value for noun callers
+  ++  json  (notebook-detail:enjs:notes-json nd)  ::  JSON for HTTP callers
+  --
+--
+```
+
+```hoon
+::  in +on-peek: build the noun-typed value, return through the typed mark
+[%x %v0 %notebook ship=@ name=@ ~]
+  =/  =flag:n  [(slav %p ship.pole) `@tas`name.pole]
+  ?~  entry=(get-book flag)  ~
+  ``notes-notebook+!>(`notebook-detail:n`[flag notebook.notebook-state.u.entry])
+```
+
+This is preferable to `json+!>(...)` for any peek that might be consumed by another agent — that path then has to decode JSON instead of getting a typed noun. Once you commit to the wire-format-agnostic shape, you also factor out a small surface type per endpoint (`notebook-summary`, `member-record`, `published-record`, etc.), which makes the noun side legible without parsing JSON. Reach for this any time a peek endpoint is HTTP-facing *and* might be consumed in-Urbit.
 
 ---
 

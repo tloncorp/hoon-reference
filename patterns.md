@@ -42,6 +42,129 @@ Use `=*` (tistar) when you just want a shorter name for an existing wing or expr
 
 Use `=/` in place of `=*` only when you will be modifying the value but need to track the original, or when you want to freeze the value at bind time for some other reason.
 
+**Audit pass criteria.** When reviewing a freshly written arm, scan every `=/` and decide:
+
+- **Source is a pure wing access (`a.b.c`)? → `=*`** if you reference it 2+ times and the path is verbose enough to obscure the call sites; **inline directly** if used once or if the source is short (roughly 14 characters or less).
+- **Source is a computed value** (function call, literal, constructed cell)? → keep `=/`. These aren't aliases; they freeze a result.
+- **`=/  =face:type  source`?** → keep. The `=face` form is a face-mold cast, not aliasing.
+- **Used zero times?** → delete.
+
+The rule of thumb: `=/` for results, `=*` for aliases, inline for once-and-short. Mixing them up isn't wrong, just noisy — `=/  fid=@ud  id.c-notebook.cmd` adds a redundant `@ud` annotation and a copy where `=*  fid  id.c-notebook.cmd` would do.
+
+### Faces Default to the Type Name
+
+When binding a value, default to using the type name itself as the face: `=/  notebook=notebook:n  ...`, `=/  flag=flag:n  ...`, `=/  note=note:n  ...`. Only deviate (`nb`, `nf`, `nt`) when a real shadowing collision forces it.
+
+```hoon
+::  GOOD: face = type name
+=/  notebook=notebook:n
+  [nid title.act [our now now our]:bowl]
+=.  notebook.notebook-state  notebook
+
+::  BAD: ad-hoc abbreviation when no shadowing forces it
+=/  nb=notebook:n
+  [nid title.act [our now now our]:bowl]
+=.  notebook.notebook-state  nb
+```
+
+Combine with the `=face:type` shortcut (Hoon auto-creates a face matching the type name) wherever it applies:
+
+```hoon
+::  GOOD: =face:type — face name auto-derived from type
+=/  =flag:n  [(slav %p ship.pole) `@tas`name.pole]
+=/  =notebook:n  [...]
+
+::  REDUNDANT: writing the face name explicitly when it matches the type
+=/  flag=flag:n  [(slav %p ship.pole) `@tas`name.pole]
+```
+
+The slight stutter in lines like `se-core(flag flag, ...)` (a wing-replace where the new value's face matches the wing) is acceptable — readability of the type name wins over avoiding the stutter. Wing resolution is right-to-left dot lookup, so a local face named `notebook` doesn't shadow `.notebook` of `notebook-state` in expressions like `notebook.notebook-state` — the dotted path still resolves correctly.
+
+### Cast Above Assertions
+
+In a gate arm, the cast (`^+ se-core`, `^- type`) goes immediately after the gate sample, *above* any `?>`/`?<` assertions:
+
+```hoon
+::  GOOD: cast first, then narrow
+++  se-rename-notebook
+  |=  cmd=c-cmd:n
+  ^+  se-core                         ::  cast: tells the type system what we produce
+  ?>  ?=(%rename -.c-notebook.cmd)    ::  narrow inside that cast's scope
+  ?>  (se-is-owner src.bowl)
+  ...
+
+::  BAD: assertions before the cast
+++  se-rename-notebook
+  |=  cmd=c-cmd:n
+  ?>  ?=(%rename -.c-notebook.cmd)
+  ^+  se-core                         ::  cast comes too late
+  ...
+```
+
+The cast is a contract about the arm's output. Assertions narrow the *input* types — they should run inside the cast's scope, not before it. This ordering also matches how the rest of the body reads: cast on top, then guards, then logic.
+
+### Tuple Types with `*` for Don't-Care Parts
+
+When binding a value whose type is a tuple but you only access part of it, replace the unused fields with `*`:
+
+```hoon
+::  GOOD: only -.net.entry is checked, so the second half is *
+=/  entry=[=net:n *]
+  (~(got by books.state) flag)
+?:  ?=(%pub -.net.entry)
+  ...
+
+::  GOOD: only the notebook-state half is read
+=/  entry=[* =notebook-state:n]
+  (~(got by books.state) flag)
+=*  title  title.notebook.notebook-state.entry
+
+::  BAD: full type when half is unused
+=/  entry=[=net:n =notebook-state:n]
+  (~(got by books.state) flag)
+?:  ?=(%pub -.net.entry)              ::  notebook-state.entry never used
+  ...
+```
+
+`*` (the bunt of any noun) is the hoon idiom for "I don't care about this part". The compiler still type-checks the parts you *do* annotate. This applies inside gate samples too — `|= [f=flag-v9:n [* =notebook-state:n]]` for a turn body that only reads the notebook-state half.
+
+### Same-Subject Cell Collapse `[a b c]:subject`
+
+When constructing a cell whose elements are all wings of the same subject, **and** that cell is the *last* sub-expression of the surrounding form, collapse to `[a b c]:subject`:
+
+```hoon
+::  GOOD: gate args are wings of bowl; the cell is the last (only) expression
+(slugify [title id]:notebook.notebook-state)
+
+::  GOOD: bowl-tail of the notebook tuple. The cell is the LAST element
+::  of the outer tuple, so the splice extends through.
+=/  =notebook:n
+  [nid title.act [our now now our]:bowl]
+
+::  GOOD: list-item construction — last sub-expression is :notebook-state
+`[flag [notebook visibility]:notebook-state]
+```
+
+The "last sub-expression" caveat matters because `[a b c]:subject` is structurally `=>(subject [a b c])` — the right-associative noun shape splices the subject into the trailing slot. If the cell isn't last, the splice doesn't apply and you have to write the wings out:
+
+```hoon
+::  WRONG to apply collapse here: revision=@ud follows the bowl-cell,
+::  so [src now now src]:bowl is NOT the last element of the outer tuple.
+::  The note construction must spell every wing:
+=/  =note:n
+  :*  nid
+      id.notebook.notebook-state
+      fid
+      title.c-notebook.cmd
+      ~
+      body-md.c-notebook.cmd
+      src.bowl  now.bowl  now.bowl  src.bowl    ::  inline; collapse not available
+      revision=0
+  ==
+```
+
+Reach for this when an arm has multiple `[our now now our]:bowl` or `[title id]:foo`-shape constructions. It's micro-optimization — three keystrokes saved per use — but it reduces visual repetition in dense type-construction code.
+
 ### Bare Computed Arms for Predicates
 
 When a predicate depends only on state and needs no arguments, write it as a bare arm — no gate:
@@ -281,6 +404,56 @@ This lets helper arms just call `(emit card)` instead of threading card lists th
 This is a good pattern when you already have nested helper doors or wrappers. It is overkill for small agents where plain `(quip card _state)` threading stays readable.
 
 Note: abed-abet is a specific instance of a more generic pattern. Old base desk code (dojo, clay) applies this pattern for state/change accumulation on specific parts of state. That kind of factoring lets you capture logic relating to specific parts of state in dedicated "engines" which maintain all the invariants, and — because they all produce the modified engine core — can be chained very easily.
+
+### Per-Entity Engines (abed/abet)
+
+When state contains a map of entities (groups, channels, notebooks, threads) and many operations are *scoped to one entity*, factor each entity's logic into a sub-core that loads-by-id, mutates, and writes-back. The pattern has two named arms, with n number of operation arms:
+
+- `++ se-abed` — load: take the entity id, look it up in state, return a sub-core with that entity's data hoisted into the immediate subject
+- entity-mutating arms — `++ se-rename`, `++ se-update-note`, etc. — operate on the loaded subject, accumulating cards
+- `++ se-abet` — write back: stash the (possibly mutated) entity into state, hand control back to the parent core
+
+This collapses the "look up by flag → mutate → write back" boilerplate that would otherwise repeat at every call site:
+
+```hoon
+::  the sub-core: a door over [identifier, entity-data, accumulator]
+++  se-core
+  |_  [=flag =net =notebook-state gone=_|]
+  ++  se-core  .
+  ++  emit  |=(=card se-core(cor cor(cards [card cards])))   ::  accumulate via parent
+  ::
+  ++  se-abed                     ::  load: flag -> populated se-core
+    |=  f=flag
+    ^+  se-core
+    ?>  =(ship.f our.bowl)        ::  host-side assertion
+    ?~  entry=(~(get by books.state) f)  ~|(not-found+f !!)
+    se-core(flag f, net net.u.entry, notebook-state notebook-state.u.entry)
+  ::
+  ++  se-abet                     ::  write back: persist + return parent core
+    ^+  cor
+    ?:  gone                                              ::  marked deleted
+      cor(books.state (~(del by books.state) flag))
+    cor(books.state (~(put by books.state) flag [net notebook-state]))
+  ::
+  ++  se-rename                   ::  example mutating arm
+    |=  title=@t
+    ^+  se-core
+    =.  title.notebook.notebook-state  title
+    (se-update [%updated notebook.notebook-state])        ::  fat update
+  --
+
+::  call site: the chain reads top-to-bottom
+::  (load flag) -> (apply mutation) -> (write back)
+=.  cor  se-abet:(se-rename:(se-abed:se-core flag) title)
+```
+
+Three things this pattern unlocks:
+
+1. **Top-level dispatch arms collapse.** Instead of `+peek` having seven arms — one per resource — that each parse the flag, look it up, check permissions, and encode JSON, `+peek` becomes a single delegate to `++ no-peek` inside the sub-core, and the sub-core handles all per-notebook reads with the entity already loaded.
+2. **Permission and structural checks live in one place.** `se-abed` enforces "this is host-side" once; downstream arms don't re-check. A parallel `no-core` (subscriber-side) does the same for `?=(%sub -.net)`-only operations — though typically `no-abed` accepts any net and the `%sub` guard moves into the specific arms that need it, so peek/watch can use the same loaded core regardless of host/subscriber mode.
+3. **`abet` makes deletion symmetric.** A `gone=_|` flag on the sub-core lets a delete arm signal "remove this entity" without the call site knowing the difference; `abet` reads the flag and calls `del` instead of `put`.
+
+Use this pattern when state contains `(map id entity)` and at least three or four operations route to that entity.
 
 ### Cascading Guards (Early Return)
 
@@ -527,6 +700,78 @@ When HTTP handler or admin logic should follow the same path as a typed poke, re
     %resend  ...                          ::  handle special noun commands
 ==
 ```
+
+### Deduplicate Three-Repeat Idioms Behind a Helper Arm
+
+Once an idiom — a map lookup, a URL transform, an entity-existence check — appears three or more times in the same file, name it. This is the rule of thumb:
+
+```hoon
+::  GOOD: a one-line helper kills a 9-site duplicate
+++  get-book
+  |=  =flag
+  ^-  (unit [=net =notebook-state])
+  (~(get by books.state) flag)
+
+::  call sites:
+?~  entry=(get-book flag)  ~|(not-found+flag !!)
+
+::  BAD: nine peek arms that each repeat the same lookup
+++  on-peek
+  ?+  pole  ~
+      [%x %v0 %notebook ship=@ name=@ ~]
+    =/  =flag  [(slav %p ship.pole) `@tas`name.pole]
+    =/  entry=(unit [=net =notebook-state])  (~(get by books.state) flag)
+    ?~  entry  ``json+!>(~)
+    ...
+      [%x %v0 %folders ship=@ name=@ ~]
+    =/  =flag  [(slav %p ship.pole) `@tas`name.pole]
+    =/  entry=(unit [=net =notebook-state])  (~(get by books.state) flag)  ::  same lookup again
+    ?~  entry  ``json+!>(~)
+    ...
+```
+
+Common targets: state-map lookups, URL/path parsing, permission checks, JSON envelope construction. A 1-line helper that eliminates 8 copies is worth more than the same arm declared inline 8 times.
+
+Pair this with the inline `?~ name=expr` form so the call site stays a single line:
+
+```hoon
+?~  entry=(get-book flag)  ~|(not-found+flag !!)   ::  bind + null-check inline
+
+::  vs the unrolled form
+=/  entry=(unit ...)  (get-book flag)
+?~  entry  ~|(not-found+flag !!)
+```
+
+### `|^` (kelt) for Arm-Scoped Helpers
+
+When a handler accumulates four or five small helpers that nobody else needs to call, wrap the arm in `|^` and nest them inside. The helpers become inaccessible from the rest of the core, which is what you want — they were never meant to be public:
+
+```hoon
+++  poke
+  |=  [=mark =vase]
+  ^+  cor
+  |^                                   ::  scoped helpers nested below
+  ?+  mark  ~|(bad-mark+mark !!)
+      %notes-action
+    ::  ...dispatch into one of the local handlers below...
+  ::
+      %notes-command
+    ::  ...
+  ==
+  ::
+  ++  join-remote                      ::  nested: only callable from inside +poke
+    |=  =flag
+    ^+  cor
+    ...
+  ::
+  ++  handle-send-invite
+    |=  [=flag who=ship]
+    ^+  cor
+    ...
+  --
+```
+
+This is the same `|^` you use inside `on-load` to scope migration arms — same purpose, different host arm. Reach for it when arm-private helpers start cluttering the surrounding core's namespace.
 
 ### Helper Arm Design: Args vs State Readers
 
