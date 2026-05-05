@@ -717,44 +717,60 @@ When HTTP handler or admin logic should follow the same path as a typed poke, re
 
 ### Deduplicate Three-Repeat Idioms Behind a Helper Arm
 
-Once an idiom — a map lookup, a URL transform, an entity-existence check — appears three or more times in the same file, name it. This is the rule of thumb:
+Once a small **stateless** transform — a URL parse, a permission check on an explicit argument, a JSON envelope shape — appears three or more times in the same file, name it. The classic case is a one-liner like `++ strip-query`, which drops the query string from a URL tape and is called from every URL-matching branch in an HTTP handler:
 
 ```hoon
-::  GOOD: a one-line helper kills a 9-site duplicate
-++  get-book
-  |=  =flag
-  ^-  (unit [=net =notebook-state])
-  (~(get by books.state) flag)
+::  GOOD: a one-line helper, defined once
+++  strip-query
+  |=  url=tape
+  ^-  tape
+  =/  qi=(unit @ud)  (find "?" url)
+  ?~  qi  url
+  (scag u.qi url)
 
-::  call sites:
-?~  entry=(get-book flag)  ~|(not-found+flag !!)
+::  call sites — three branches in the same +serve-http arm:
+=/  url-path=tape  (strip-query (trip url.request.inbound-request))
+...
+=/  pub-path=tape  (strip-query (slag 11 url-tape))   ::  /notes/pub/...
+...
+=/  share-path=tape  (strip-query (slag 13 url-tape)) ::  /notes/share/...
 
-::  BAD: nine peek arms that each repeat the same lookup
-++  on-peek
-  ?+  pole  ~
-      [%x %v0 %notebook ship=@ name=@ ~]
-    =/  =flag  [(slav %p ship.pole) `@tas`name.pole]
-    =/  entry=(unit [=net =notebook-state])  (~(get by books.state) flag)
-    ?~  entry  ``json+!>(~)
-    ...
-      [%x %v0 %folders ship=@ name=@ ~]
-    =/  =flag  [(slav %p ship.pole) `@tas`name.pole]
-    =/  entry=(unit [=net =notebook-state])  (~(get by books.state) flag)  ::  same lookup again
-    ?~  entry  ``json+!>(~)
-    ...
+::  BAD: open-coding the same find/scag dance at every site
+=/  url-tape=tape   (trip url.request.inbound-request)
+=/  qi=(unit @ud)   (find "?" url-tape)
+=/  url-path=tape   ?~(qi url-tape (scag u.qi url-tape))
+...
+=/  rest=tape       (slag 11 url-tape)
+=/  qi=(unit @ud)   (find "?" rest)
+=/  pub-path=tape   ?~(qi rest (scag u.qi rest))
+...
 ```
 
-Common targets: state-map lookups, URL/path parsing, permission checks, JSON envelope construction. A 1-line helper that eliminates 8 copies is worth more than the same arm declared inline 8 times.
+Good targets: URL/path parsing, permission predicates that take an explicit subject (`++ can-edit |= who=ship`), JSON envelope construction, small format conversions. A one-line helper that eliminates 8 open-coded copies is worth more than declaring the same arm inline 8 times.
 
-Pair this with the inline `?~ name=expr` form so the call site stays a single line:
+Pair this with the inline `?~ name=expr` form so a `(get …)`-style helper's call sites stay a single line:
 
 ```hoon
-?~  entry=(get-book flag)  ~|(not-found+flag !!)   ::  bind + null-check inline
+?~  qi=(find "?" url)  url   ::  bind + null-check inline
 
 ::  vs the unrolled form
-=/  entry=(unit ...)  (get-book flag)
-?~  entry  ~|(not-found+flag !!)
+=/  qi=(unit @ud)  (find "?" url)
+?~  qi  url
 ```
+
+#### When restructuring beats a helper arm
+
+The previous example is the right move because `strip-query` is a pure function of its argument — there is no entity it operates on, no `?>` it would do for you, no "next call" it would route to. When the duplication is *shaped differently* — every call site loads the same entity by id and then operates on its fields — a helper arm is a half-measure. A `++ get-book` that looks up a notebook is one call site's worth of cleanup, but every call site still has to:
+
+```hoon
+?~  entry=(get-book flag)  ``json+!>(~)        ::  null-check
+?>  (can-view-flag flag src.bowl)              ::  permission check
+=/  fld-list  (turn ~(val by folders.notebook-state.u.entry) ...)  ::  reach through .u.entry
+```
+
+The repeated work isn't the lookup — it's the *load entity → check → reach into fields*. A helper arm only collapses the first line. The real fix is to push all of that into a per-entity engine (see "Per-Entity Engines (abed/abet)" above), where `abed` does the load + permission check once and the inner arms see the entity already in subject.
+
+Rule of thumb: if your candidate helper takes only an id (`flag`, `nest`, `note-id`) and every caller follows up by reading the looked-up value's fields, the right answer is probably an `abed`-shaped sub-core, not a helper arm. If the candidate is a pure transform with no entity in sight, a helper arm is the right call.
 
 ### `|^` (kelt) for Arm-Scoped Helpers
 
