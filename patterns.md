@@ -53,32 +53,46 @@ The rule of thumb: `=/` for results, `=*` for aliases, inline for once-and-short
 
 ### Faces Default to the Type Name
 
-When binding a value, default to using the type name itself as the face: `=/  notebook=notebook:n  ...`, `=/  flag=flag:n  ...`, `=/  note=note:n  ...`. Only deviate (`nb`, `nf`, `nt`) when a real shadowing collision forces it.
+When binding a single value of some type, the default is the `=face:type` form — Hoon auto-creates a face matching the type name, so you don't write the name twice:
 
 ```hoon
-::  GOOD: face = type name
-=/  notebook=notebook:n
-  [nid title.act [our now now our]:bowl]
-=.  notebook.notebook-state  notebook
-
-::  BAD: ad-hoc abbreviation when no shadowing forces it
-=/  nb=notebook:n
-  [nid title.act [our now now our]:bowl]
-=.  notebook.notebook-state  nb
-```
-
-Combine with the `=face:type` shortcut (Hoon auto-creates a face matching the type name) wherever it applies:
-
-```hoon
-::  GOOD: =face:type — face name auto-derived from type
-=/  =flag:n  [(slav %p ship.pole) `@tas`name.pole]
-=/  =notebook:n  [...]
+::  GOOD: =face:type — face is the type's name
+=/  =flag:n        [(slav %p ship.pole) `@tas`name.pole]
+=/  =notebook:n    [nid title.act [our now now our]:bowl]
+=/  =note:n        (~(got by notes.notebook-state) nid)
 
 ::  REDUNDANT: writing the face name explicitly when it matches the type
-=/  flag=flag:n  [(slav %p ship.pole) `@tas`name.pole]
+=/  flag=flag:n    [(slav %p ship.pole) `@tas`name.pole]
+
+::  BAD: ad-hoc abbreviation with no semantic motivation
+=/  nb=notebook:n  [nid title.act [our now now our]:bowl]
 ```
 
-The slight stutter in lines like `se-core(flag flag, ...)` (a wing-replace where the new value's face matches the wing) is acceptable — readability of the type name wins over avoiding the stutter. Wing resolution is right-to-left dot lookup, so a local face named `notebook` doesn't shadow `.notebook` of `notebook-state` in expressions like `notebook.notebook-state` — the dotted path still resolves correctly.
+The slight stutter in lines like `se-core(flag flag, ...)` (a wing-replace where the new value's face matches the wing being replaced) is acceptable. Wing resolution is right-to-left dot lookup, so a local face named `notebook` doesn't shadow `.notebook` of `notebook-state` in expressions like `notebook.notebook-state` — the dotted path still resolves correctly.
+
+#### When to use a semantic face instead
+
+Reach for a non-default face when the **role** the value plays is more informative than its type — typically when multiple values of the same type coexist in scope and you need to tell them apart. The face describes *which one*, the type tag still carries *what kind*:
+
+```hoon
+::  GOOD: two notebooks in scope; face conveys role, type tag stays explicit
+=/  old-nb=notebook:n  notebook.notebook-state
+=.  notebook.notebook-state  notebook(title 'renamed', updated-by src.bowl)
+=/  new-nb=notebook:n  notebook.notebook-state
+(diff-notebooks old-nb new-nb)
+
+::  GOOD: source vs destination of a move
+=/  src-folder=folder:n  (~(got by folders.notebook-state) from-fid)
+=/  dst-folder=folder:n  (~(got by folders.notebook-state) to-fid)
+
+::  GOOD: a placeholder vs the real thing
+=/  placeholder-net=net:n  [%sub *@da |]
+::  ...later when the snapshot arrives, real-net is the one we save
+```
+
+The rule of thumb: if the face would just restate the type, use `=type` and let the type name speak. If the face would carry information the type alone doesn't (`old`, `new`, `src`, `dst`, `placeholder`, `target`), use a semantic name and keep the type tag explicit.
+
+Same logic for shadowing collisions — if a local `flag` would clash with `flag.act` you're already destructuring, pick a face that disambiguates (`book-flag`, `target-flag`) rather than dropping back to a vowel-stripped abbreviation.
 
 ### Cast Above Assertions
 
