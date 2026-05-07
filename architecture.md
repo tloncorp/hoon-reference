@@ -66,6 +66,21 @@ Every Gall agent implements this interface:
 --
 ```
 
+#### State fields resolve without `.state`
+
+Because `=|  state-0` pins state at the head of the subject and `=*  state  -` aliases it, wing resolution finds the inner fields *directly*. Prefer the unprefixed form:
+
+```hoon
+::  GOOD: wing search finds books inside the head-pinned state
+=.  books  (~(put by books) flag entry)
+?:  (~(has by invites) flag)  ...
+
+::  ALSO FINE but redundant — same lookup, more typing
+=.  books.state  (~(put by books.state) flag entry)
+```
+
+Keep the explicit `.state` only when local shadowing forces it (e.g. an arm that takes a `=state` argument). Inner-struct accesses like `members.notebook-state` or `notebook.notebook-state` are unaffected — those reach through a value bound by `=/` or a sub-core door, not the agent state at subject head.
+
 ### State Versioning and Migration
 
 For persistent production agents, default to tagging state with a version number in the head and migrating through each version sequentially in `on-load`:
@@ -394,6 +409,37 @@ Client UI --(a-action)--> go-core --(c-command)--> se-core (host)
                                     (to log,                 (to client
                                      to members)              subscribers)
 ```
+
+### Always poke the host
+
+A subtle but important operational pattern follows from the trust boundary in principle 4: the **action handler always pokes the host with a c-command, regardless of whether the host is us or a remote ship**. If `host == our.bowl`, Gall loops the poke back through `+poke %notes-command` and dispatches it through the host engine (`se-core`) — the action handler never branches on host vs. subscriber.
+
+```hoon
+::  GOOD: a-action handler always emits a poke to the host
+::  Gall loops it back to ourselves if we're the host.
+++  no-action
+  |=  act=action:n
+  ^+  no-core
+  ?>  ?=(%notebook -.act)
+  =/  cmd=command:n  [%notebook flag.act (a-notebook-to-c-notebook a-notebook.act)]
+  %-  emit
+  :*  %pass  /notes/poke/(scot %p ship.flag.act)/[name.flag.act]
+      %agent  [ship.flag.act %notes]
+      %poke   notes-command+!>(cmd)
+  ==
+
+::  BAD: branching on host/sub at the action layer
+++  poke
+  ::  ...
+  =/  entry  (~(got by books) flag)
+  ?:  ?=(%pub -.net.entry)
+    se-abet:(se-poke:(se-abed:se-core flag) ...)   ::  host path
+  no-abet:(no-action:(no-abed:no-core flag) act)   ::  subscriber path
+```
+
+The collapse this enables: c-command processing is the **single dispatch point** for all state-changing logic. The action handler converts shape (`a-` to `c-`) and routes; the host engine does all the work. There's no "if we're the host, run it locally" shortcut. This costs one Gall hop on self-pokes — negligible — and buys exactly one place where validation, permission checks, log appending, and update fanout live.
+
+The `++ no-action` arm above is in `no-core` (the subscriber-side engine) but the pattern is the same when we're the host: the poke goes to `[ship.flag %notes]`, which is `[our.bowl %notes]`, which Gall delivers as a self-poke back to `+poke %notes-command`. From there `se-poke:(se-abed:se-core flag)` does the real work.
 
 The response path in the agent converts to multiple versions simultaneously:
 

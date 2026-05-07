@@ -124,18 +124,18 @@ When binding a value whose type is a tuple but you only access part of it, repla
 ```hoon
 ::  GOOD: only -.net.entry is checked, so the second half is *
 =/  entry=[=net:n *]
-  (~(got by books.state) flag)
+  (~(got by books) flag)
 ?:  ?=(%pub -.net.entry)
   ...
 
 ::  GOOD: only the notebook-state half is read
 =/  entry=[* =notebook-state:n]
-  (~(got by books.state) flag)
+  (~(got by books) flag)
 =*  title  title.notebook.notebook-state.entry
 
 ::  BAD: full type when half is unused
 =/  entry=[=net:n =notebook-state:n]
-  (~(got by books.state) flag)
+  (~(got by books) flag)
 ?:  ?=(%pub -.net.entry)              ::  notebook-state.entry never used
   ...
 ```
@@ -440,14 +440,14 @@ This collapses the "look up by flag → mutate → write back" boilerplate that 
     |=  f=flag
     ^+  se-core
     ?>  =(ship.f our.bowl)        ::  host-side assertion
-    ?~  entry=(~(get by books.state) f)  ~|(not-found+f !!)
+    ?~  entry=(~(get by books) f)  ~|(not-found+f !!)
     se-core(flag f, net net.u.entry, notebook-state notebook-state.u.entry)
   ::
   ++  se-abet                     ::  write back: persist + return parent core
     ^+  cor
     ?:  gone                                              ::  marked deleted
-      cor(books.state (~(del by books.state) flag))
-    cor(books.state (~(put by books.state) flag [net notebook-state]))
+      cor(books (~(del by books) flag))
+    cor(books (~(put by books) flag [net notebook-state]))
   ::
   ++  se-rename                   ::  example mutating arm
     |=  title=@t
