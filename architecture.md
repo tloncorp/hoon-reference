@@ -208,6 +208,13 @@ Return `(unit (unit cage))` — `~` for "no binding", `[~ ~]` for "path exists b
 
 `on-watch` guards subscription access and optionally gives initial data. `on-agent` handles responses on wires you previously `%pass`ed:
 
+Gall removes an outgoing subscription from `wex.bowl` in the same event
+that processes your `%leave` — there is no window where a finished
+subscription lingers until the publisher acks, and gall nonces the
+underlying wires itself, so re-watching on the same wire immediately
+after a `%leave` is safe. Don't add nonces or other workarounds for a
+"stale wex entry" that can't exist.
+
 ```hoon
 ++  on-watch
   |=  =path
@@ -487,9 +494,21 @@ Document every type with its purpose. Document fields with trailing `::` comment
   ==
 ```
 
+The first line is a terse `$name: purpose`; details go below the bare
+`::`, referencing fields as `.field` and types as `$type`. Keep it
+lowercase, and keep it minimal — one line with no detail block is the
+common case (`::  $said: single-shot /v0/said response`). Don't pad
+type docs with explanations of things the names already say.
+
 ---
 
 ## Mark System (mar/)
+
+Mark version suffixes (`-1`, `-2`, ...) track wire revisions. A brand-new
+mark starts unversioned (`%notes-said`, not `%notes-said-1`); the suffix
+appears when the wire format actually revises, and within an agent the
+suffix should stay paired with the path version that speaks it (v0 paths
+give unversioned marks, `/v1/...` gives `-1` marks).
 
 Marks define how data is serialized and converted between formats. Every mark is a door:
 
