@@ -1141,6 +1141,16 @@ cell adds brackets without adding readability:
 (poke-a %notebook f [%create-note 2 'T' 'B'])
 ```
 
+Test headers use the same flag-comment style as everything else — never
+asciidoc-style banners (`::  ====  test-x  ====`), which are not a hoon
+convention no matter how many of them appear in a file you're imitating:
+
+```hoon
+::  +test-join-public-accepts: non-member join of a public notebook
+::
+++  test-join-public-accepts
+```
+
 ---
 
 ## Common Pitfalls
