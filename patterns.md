@@ -993,7 +993,7 @@ supporting code: a self-explanatory improvement needs no comment.
 ::  good
 ::  $note-preview: trimmed note view served on /v0/said
 ::
-::  .snippet is the leading slice of $note's body-md
+::  .snippet is the leading slice of body-md.note
 ::
 ```
 
