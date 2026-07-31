@@ -179,6 +179,28 @@ The "last sub-expression" caveat matters because `[a b c]:subject` is structural
 
 Reach for this when an arm has multiple `[our now now our]:bowl` or `[title id]:foo`-shape constructions. It's micro-optimization — three keystrokes saved per use — but it reduces visual repetition in dense type-construction code.
 
+### Bare Arguments Instead of Literal Cells
+
+Call gates with bare arguments and let the call auto-cons; a literal cell
+adds brackets without adding readability.
+
+```hoon
+(poke-a %create-notebook 'NB')        ::  not (poke-a [%create-notebook 'NB'])
+```
+
+This flattens through nesting, but only on the *trailing* element — the same
+right-associativity that makes `[a b c]:subject` work. If the gate takes
+`[dap=term f=flag cmd=command]` and `command` is head-tagged, every leaf can
+go bare:
+
+```hoon
+(poke-a %notebook f %create-note 2 'T' 'B')
+::  not (poke-a %notebook f [%create-note 2 'T' 'B'])
+```
+
+A nested cell that *isn't* last keeps its brackets — the splice only reaches
+the tail.
+
 ### Bare Computed Arms for Predicates
 
 When a predicate depends only on state and needs no arguments, write it as a bare arm — no gate:
@@ -966,11 +988,60 @@ Chain set operations for readable permission/filtering logic:
 ::    x  /targets(/[list])       (set ship)  local one-sided friendships
 ```
 
+Comments are lowercase. Don't capitalize sentence starts the way prose
+would — `::  mirrors +se-member-join`, not `::  Mirrors +se-member-join`.
+
+When commenting a code segment inside an arm, prefer a *flag comment*: the
+comment block sits above the segment and is closed with a bare `::` line
+before the code resumes.
+
+```hoon
+    ::  single-shot note reference preview: answer from state if we can,
+    ::  else proxy one watch to the host and relay its answer in +agent.
+    ::
+    =/  =flag:n  [(slav %p ship.pole) `@tas`name.pole]
+```
+
+No tutorial-style or self-help comments. A comment that restates what a
+well-chosen name already says, reassures the reader, or explains the
+obvious is noise — delete it. The same goes for shell scripts and other
+supporting code: a self-explanatory improvement needs no comment.
+
+```hoon
+::  bad: "a snippet is not the full document" is implied by the word
+::  $note-preview: trimmed note view — snippet is the leading slice of
+::  body-md, not the full document.
+
+::  good
+::  $note-preview: trimmed note view
+::
+::  .snippet is the leading slice of body-md.note
+::
+```
+
 ---
 
 ## Error Handling
 
 Hoon has no exceptions. Errors either crash the computation or are handled structurally.
+
+### One Meaning per Error Response
+
+A semantic error answer (a `%denied` fact, a `%not-found` response) must
+mean exactly one condition. Never coerce unrelated failures — crashes,
+nacks, malformed data — into the nearest semantic answer: it masks real
+bugs as clean errors and poisons error semantics system-wide. Give
+genuine failures their own generic channel (an `%error` mark or response
+that may carry a server-generated message), and keep the semantic answer
+reserved for its one condition.
+
+Where the interface already answers in responses — a venter-style poke
+result, a single-shot preview fact — a semantically clear error should
+get the right error response rather than a crash. That is not a mandate
+to replace crashes with error facts everywhere: rejecting a subscription
+for lack of permission by crashing is still the architecturally correct
+choice in most places, and crashing remains right for programming errors
+and untrusted input.
 
 ### Crash with Context (~|)
 
@@ -1051,6 +1122,43 @@ A `tang` is `(list tank)` — a structured error trace. You'll see it in crash h
 
 ---
 
+## Test Conventions (/lib/test-agent)
+
+Monadic agent tests spell `bind:m` at each step — don't alias it away
+(`=*  b  bind:m` saves keystrokes but departs from convention and reads
+worse):
+
+```hoon
+++  test-said-host-answers-member
+  %-  eval-mare
+  =/  m  (mare ,~)
+  ^-  form:m
+  ;<  ~  bind:m  init-zod
+  ;<  caz=(list card)  bind:m  (do-watch /v0/some/path)
+  (ex-cards caz ~)
+```
+
+Use `+do-as` for a temporarily different `src.bowl` instead of paired
+`set-src` calls — it scopes the change to one step and restores src
+afterward:
+
+```hoon
+;<  caz=(list card)  bind:m
+  ((do-as ~bus) (do-watch (said-watch-path f 3)))
+```
+
+Test headers use the same flag-comment style as everything else — never
+asciidoc-style banners (`::  ====  test-x  ====`), which are not a hoon
+convention no matter how many of them appear in a file you're imitating:
+
+```hoon
+::  +test-join-public-accepts: non-member join of a public notebook
+::
+++  test-join-public-accepts
+```
+
+---
+
 ## Common Pitfalls
 
 Things to watch out for when writing Hoon:
@@ -1109,7 +1217,28 @@ In `?+` and `?-`, the case tag is indented 4 spaces, and its body is indented 2 
 ?=  [[@ @] @ ~]  path
 ```
 
-### 5. `=.` Only Changes the Subject for the Body Below
+### 5. Wet Stdlib Gates on `?~`-Narrowed Lists
+
+`+rear`, `+snip`, and friends are wet gates specced on `(lest)`. Calling
+them with a `?~`-narrowed `lest` sample can fail to mull: their internal
+`$(a t.a)` can't nest the list-typed tail back into the lest-typed input
+(`have %~, need [i=@c ...]`, with `mull-nice` in the trace).
+
+```hoon
+::  bad: mull-fails at the +snip call
+?~  keep  ''
+=/  last  (rear keep)
+$(keep (snip keep))
+
+::  good: plain head/tail walk (flop first to work from the end)
+=/  peek  (flop keep)
+|-
+?~  peek  ''
+?.  (glue i.peek)  (crip (tufa (flop peek)))
+$(peek t.peek)
+```
+
+### 6. `=.` Only Changes the Subject for the Body Below
 
 `=.` doesn't "return" the changed value — it changes the subject for the rest of the expression:
 

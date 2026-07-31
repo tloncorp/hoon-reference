@@ -38,6 +38,8 @@ Configuration files at the desk root:
 
 In this code style, files usually start with `::  name: short description` followed by longer doc comments. Type definitions often get inline `::` comments explaining each field.
 
+Name resolution for `/-` and `/+` segments hyphens: `/+  notes-json` resolves `/lib/notes-json.hoon` *or* `/lib/notes/json.hoon`. Never use a `/=` fascall to import a library from a nested directory — `/+` already reaches it.
+
 ---
 
 ## Imports
@@ -49,6 +51,7 @@ In this code style, files usually start with `::  name: short description` follo
 /-  g=groups, c=chat, meta       ::  multiple imports
 /+  default-agent, dbug, verb    ::  import /lib/ libraries
 /+  gc=groups-conv               ::  library with alias
+/+  nj=notes-json                ::  hyphens segment: finds /lib/notes/json.hoon too
 /~  pages  (page:rudder records command)  /app/pals/webui  ::  directory import
 /=  create-thread  /ted/group/create      ::  build a file as a mark
 /%  m-noun  %noun                ::  warm a mark (pre-compile)
