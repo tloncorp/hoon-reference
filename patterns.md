@@ -179,6 +179,28 @@ The "last sub-expression" caveat matters because `[a b c]:subject` is structural
 
 Reach for this when an arm has multiple `[our now now our]:bowl` or `[title id]:foo`-shape constructions. It's micro-optimization — three keystrokes saved per use — but it reduces visual repetition in dense type-construction code.
 
+### Bare Arguments Instead of Literal Cells
+
+Call gates with bare arguments and let the call auto-cons; a literal cell
+adds brackets without adding readability.
+
+```hoon
+(poke-a %create-notebook 'NB')        ::  not (poke-a [%create-notebook 'NB'])
+```
+
+This flattens through nesting, but only on the *trailing* element — the same
+right-associativity that makes `[a b c]:subject` work. If the gate takes
+`[dap=term f=flag cmd=command]` and `command` is head-tagged, every leaf can
+go bare:
+
+```hoon
+(poke-a %notebook f %create-note 2 'T' 'B')
+::  not (poke-a %notebook f [%create-note 2 'T' 'B'])
+```
+
+A nested cell that *isn't* last keeps its brackets — the splice only reaches
+the tail.
+
 ### Bare Computed Arms for Predicates
 
 When a predicate depends only on state and needs no arguments, write it as a bare arm — no gate:
@@ -991,7 +1013,7 @@ supporting code: a self-explanatory improvement needs no comment.
 ::  body-md, not the full document.
 
 ::  good
-::  $note-preview: trimmed note view served on /v0/said
+::  $note-preview: trimmed note view
 ::
 ::  .snippet is the leading slice of body-md.note
 ::
@@ -1013,21 +1035,13 @@ genuine failures their own generic channel (an `%error` mark or response
 that may carry a server-generated message), and keep the semantic answer
 reserved for its one condition.
 
-```hoon
-::  bad: a host crash (watch nack) becomes a permission answer
-    %watch-ack
-  ?~  p.sign  cor
-  (give %fact paths notes-denied+!>(~))
-
-::  good: denials are denials, failures are failures
-    %watch-ack
-  ?~  p.sign  cor
-  (give %fact paths notes-error+!>(~))
-```
-
-Corollary: don't crash the host for a semantically clear error — answer
-with the right error response instead. Crashing is for programming
-errors and untrusted input, not for "that note doesn't exist."
+Where the interface already answers in responses — a venter-style poke
+result, a single-shot preview fact — a semantically clear error should
+get the right error response rather than a crash. That is not a mandate
+to replace crashes with error facts everywhere: rejecting a subscription
+for lack of permission by crashing is still the architecturally correct
+choice in most places, and crashing remains right for programming errors
+and untrusted input.
 
 ### Crash with Context (~|)
 
@@ -1131,14 +1145,6 @@ afterward:
 ```hoon
 ;<  caz=(list card)  bind:m
   ((do-as ~bus) (do-watch (said-watch-path f 3)))
-```
-
-Call gates with bare arguments and let the call auto-cons; a literal
-cell adds brackets without adding readability:
-
-```hoon
-(poke-a %create-notebook 'NB')            ::  not (poke-a [%create-notebook 'NB'])
-(poke-a %notebook f [%create-note 2 'T' 'B'])
 ```
 
 Test headers use the same flag-comment style as everything else — never

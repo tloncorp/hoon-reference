@@ -504,11 +504,14 @@ type docs with explanations of things the names already say.
 
 ## Mark System (mar/)
 
-Mark version suffixes (`-1`, `-2`, ...) track wire revisions. A brand-new
-mark starts unversioned (`%notes-said`, not `%notes-said-1`); the suffix
-appears when the wire format actually revises, and within an agent the
-suffix should stay paired with the path version that speaks it (v0 paths
-give unversioned marks, `/v1/...` gives `-1` marks).
+Generally, mark version suffixes (`-1`, `-2`, ...) track wire revisions. A
+brand-new mark starts unversioned (`%notes-said`, not `%notes-said-1`); the
+suffix appears when the wire format actually revises, and within an agent
+the suffix tends to stay paired with the path version that speaks it. The
+two counters do drift, though — in `channels`, both `/x/v0` and `/x/v1`
+give `%channels`, and `/x/v3/heads` gives `%channel-heads-2` — so read the
+`+on-peek` cases to see which mark a path actually serves rather than
+inferring it from the version number.
 
 Marks define how data is serialized and converted between formats. Every mark is a door:
 
