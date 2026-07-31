@@ -497,7 +497,7 @@ Document every type with its purpose. Document fields with trailing `::` comment
 The first line is a terse `$name: purpose`; details go below the bare
 `::`, referencing fields as `.field` and types as `$type`. Keep it
 lowercase, and keep it minimal — one line with no detail block is the
-common case (`::  $said: single-shot /v0/said response`). Don't pad
+common case (`::  $said: single-shot preview response`). Don't pad
 type docs with explanations of things the names already say.
 
 ---
